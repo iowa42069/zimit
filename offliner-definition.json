@@ -899,7 +899,7 @@
       "type": "string",
       "required": false,
       "title": "Charsets to try",
-      "description": "List of charsets to try decode content when charset is not found",
+      "description": "List of charsets to try decode content when charset is not found. Default: UTF-8,ISO-8859-1",
       "alias": "charsets-to-try"
     },
     "ignore_content_header_charsets": {
@@ -923,6 +923,13 @@
       "title": "Ignore HTTP Header Charsets",
       "description": "Ignore the charsets specified in HTTP `Content-Type` headers, typically because they are wrong.",
       "alias": "ignore-http-header-charsets"
+    },
+    "ignore_unknown_charsets": {
+      "type": "boolean",
+      "required": false,
+      "title": "Ignore Unknown Charsets",
+      "description": "When encountering an unknown charsets content or HTTP header, do not fail but try --charsets-to-try for potential match.",
+      "alias": "ignore-unknown-charsets"
     },
     "encoding_aliases": {
       "type": "string",
