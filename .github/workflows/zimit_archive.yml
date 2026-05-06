@@ -6,13 +6,13 @@ on:
       website_url:
         description: 'The URL of the website to archive'
         required: true
-      # No need for a specific ZIM file name input anymore
+        type: string
 
 jobs:
   archive_website:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Needed to push commits
 
     steps:
       - name: Checkout repository
@@ -42,7 +42,6 @@ jobs:
           ls -l ${{ github.workspace }}/output
           echo "::endgroup::"
 
-          # Find the first .zim file in the output directory
           ZIM_FILE=$(find ${{ github.workspace }}/output -maxdepth 1 -name "*.zim" -print -quit)
 
           if [ -z "$ZIM_FILE" ]; then
@@ -51,7 +50,6 @@ jobs:
           fi
 
           echo "Found ZIM file: $ZIM_FILE"
-          # Extract just the filename for artifact upload and commit
           FILENAME=$(basename "$ZIM_FILE")
           echo "::set-output name=zim_file_path::$ZIM_FILE"
           echo "::set-output name=zim_file_name::$FILENAME"
@@ -59,8 +57,8 @@ jobs:
       - name: Upload ZIM file artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.find_zim.outputs.zim_file_name }} # Use the found filename
-          path: ${{ steps.find_zim.outputs.zim_file_path }} # Use the found full path
+          name: ${{ steps.find_zim.outputs.zim_file_name }}
+          path: ${{ steps.find_zim.outputs.zim_file_path }}
 
       - name: Commit and push ZIM file
         run: |
@@ -73,13 +71,14 @@ jobs:
           fi
 
           echo "Preparing to commit and push: $ZIM_FILE_NAME"
-          cd ${{ github.workspace }} # Ensure we are in the root of the workspace for git commands
+          cd ${{ github.workspace }}
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
 
-          # Add the specific file found
+          # Add only the specific ZIM file
           git add "$ZIM_FILE_PATH"
 
+          # Check if there are staged changes before committing
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
