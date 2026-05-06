@@ -1,0 +1,60 @@
+name: Zimit Website Archiver
+
+on:
+  workflow_dispatch:
+    inputs:
+      website_url:
+        description: 'The URL of the website to archive'
+        required: true
+      zim_file_name:
+        description: 'Name for the ZIM file (e.g., mywebsite_archive)'
+        required: true
+      repo_token:
+        description: 'GitHub token for pushing to the repository'
+        required: true
+        type: string
+        default: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  archive_website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ inputs.repo_token }} # Use the provided token
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Run Zimit to create ZIM file
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/output:/output \
+            ghcr.io/openzim/zimit \
+            zimit --seeds ${{ inputs.website_url }} \
+            --name ${{ inputs.zim_file_name }} \
+            --output /output \
+            --pageLimit 1000 # Adjust pageLimit as needed
+
+      - name: Upload ZIM file artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.zim_file_name }}.zim
+          path: output/${{ inputs.zim_file_name }}.zim
+
+      - name: Commit and push ZIM file
+        run: |
+          cd output
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add ${{ inputs.zim_file_name }}.zim
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Automated ZIM archive of ${{ inputs.website_url }}"
+            git push origin HEAD:${{ github.ref_name }} # Push to the current branch
+          fi
+        env:
+          GITHUB_TOKEN: ${{ inputs.repo_token }}
