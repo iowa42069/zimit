@@ -6,8 +6,8 @@ on:
       website_url:
         description: 'The URL of the website to archive'
         required: true
-      zim_file_name:
-        description: 'Name for the ZIM file (e.g., mywebsite_archive)'
+      zim_file_name_prefix: # Renamed for clarity, to indicate it's a prefix
+        description: 'Prefix for the ZIM file name (e.g., mywebsite)'
         required: true
 
 jobs:
@@ -24,42 +24,45 @@ jobs:
         uses: docker/setup-buildx-action@v2
 
       - name: Run Zimit to create ZIM file
-        id: zimit_run # Give this step an ID to reference its output later
+        id: zimit_run
         run: |
           echo "::group::Zimit Docker Run Output"
           docker run --rm \
             -v ${{ github.workspace }}/output:/output \
             ghcr.io/openzim/zimit \
             zimit --seeds ${{ github.event.inputs.website_url }} \
-            --name ${{ github.event.inputs.zim_file_name }} \
+            --name ${{ github.event.inputs.zim_file_name_prefix }} \
             --output /output \
-            --pageLimit 1000 # Adjust pageLimit as needed
+            --pageLimit 1000
           echo "::endgroup::"
 
       - name: List files in output directory
+        id: list_files # Give this step an ID
         run: |
           echo "::group::Contents of the output directory:"
           ls -l ${{ github.workspace }}/output
           echo "::endgroup::"
+          # Extract the actual ZIM filename and set it as an output
+          # This assumes the ZIM file is the only .zim file in the directory
+          ACTUAL_ZIM_FILE=$(ls ${{ github.workspace }}/output | grep '\.zim$' | head -n 1)
+          echo "::set-output name=actual_zim_file::$ACTUAL_ZIM_FILE"
 
       - name: Upload ZIM file artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.zim_file_name }}.zim
-          path: output/${{ github.event.inputs.zim_file_name }}.zim
+          name: ${{ steps.list_files.outputs.actual_zim_file }} # Use the captured filename
+          path: output/${{ steps.list_files.outputs.actual_zim_file }} # Use the captured filename
 
       - name: Commit and push ZIM file
         run: |
           cd output
-          # Construct the expected file name
-          ZIM_FILE="${{ github.event.inputs.zim_file_name }}.zim"
+          ZIM_FILE="${{ steps.list_files.outputs.actual_zim_file }}" # Use the captured filename
 
-          # Check if the file exists before attempting to add and commit
           if [ ! -f "$ZIM_FILE" ]; then
             echo "Error: ZIM file '$ZIM_FILE' not found in the output directory."
             echo "Contents of output directory:"
             ls -l
-            exit 1 # Exit with an error code
+            exit 1
           fi
 
           echo "Found ZIM file: $ZIM_FILE"
@@ -70,7 +73,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Automated ZIM archive of ${{ github.event.inputs.website_url }}"
+            git commit -m "Automated ZIM archive of ${{ github.event.inputs.website_url }} (File: $ZIM_FILE)"
             git push origin HEAD:${{ github.ref_name }}
           fi
         env:
