@@ -1,4 +1,4 @@
-name: Zimit Website Archiver (Flexible Naming)
+name: Zimit Website Archiver
 
 on:
   workflow_dispatch:
@@ -28,10 +28,11 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}/output:/output \
             ghcr.io/openzim/zimit \
-            zimit --seeds ${{ github.event.inputs.website_url }} \
-            --name zimit_generated # Using a generic name, Zimit might still append date/time
-            --output /output \
-            --pageLimit 1000
+            zimit \
+              --seeds ${{ github.event.inputs.website_url }} \
+              --name zimit_generated \
+              --output /output \
+              --pageLimit 1000
           echo "::endgroup::"
 
       - name: Find the generated ZIM file
