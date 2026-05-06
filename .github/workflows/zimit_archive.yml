@@ -18,13 +18,13 @@ on:
         default: ''
         type: string
 
-jobs:
-  archive_website:
+jobs: # This is the top-level jobs key
+  archive_website: # This is the job ID
     runs-on: ubuntu-latest
     permissions:
       contents: write # Needed to commit back to the repository
 
-    steps:
+    steps: # Steps are nested under the job
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -56,7 +56,7 @@ jobs:
         run: docker pull openzim/zimit:latest
 
       - name: Run Zimit to create ZIM file
-        id: run_zimit
+        id: run_zimit # Added ID for potential future use/reference
         run: |
           set -e # Exit immediately if a command exits with a non-zero status.
           set -o pipefail # Causes a pipeline to return the exit status of the last command that exited with a non-zero status.
@@ -104,6 +104,7 @@ jobs:
             echo "zim_file_name=$ZIM_FILE_NAME" >> $GITHUB_OUTPUT
           else
             echo "Error: No .zim file found in '$OUTPUT_DIR' after Zimit run."
+            # Explicitly set outputs to empty to indicate failure
             echo "zim_file_path=''" >> $GITHUB_OUTPUT
             echo "zim_file_name=''" >> $GITHUB_OUTPUT
             # Exit with a non-zero status to fail the workflow run
