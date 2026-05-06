@@ -9,27 +9,16 @@ on:
       zim_file_name:
         description: 'Name for the ZIM file (e.g., mywebsite_archive)'
         required: true
-      # We will remove the repo_token input from here as GITHUB_TOKEN is automatically available
-      # repo_token:
-      #   description: 'GitHub token for pushing to the repository'
-      #   required: true
-      #   type: string
-      #   default: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   archive_website:
     runs-on: ubuntu-latest
-    permissions: # Add this block
-      contents: write # This grants write access to the repository contents
-      # You might also need packages: write if you were publishing to GHCR,
-      # but for pushing to the repo, 'contents: write' is key.
+    permissions:
+      contents: write # Grants write access to the repository contents
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-        # No need for token input here if using default GITHUB_TOKEN with write permissions
-        # with:
-        #   token: ${{ inputs.repo_token }}
+        uses: actions/checkout@v4 # Updated checkout to v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -45,7 +34,7 @@ jobs:
             --pageLimit 1000 # Adjust pageLimit as needed
 
       - name: Upload ZIM file artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4 # Updated upload-artifact to v4
         with:
           name: ${{ github.event.inputs.zim_file_name }}.zim
           path: output/${{ github.event.inputs.zim_file_name }}.zim
@@ -63,4 +52,4 @@ jobs:
             git push origin HEAD:${{ github.ref_name }}
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This env var is automatically available
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
