@@ -44,9 +44,31 @@ jobs:
 
       - name: Set up Docker
         run: |
+          # Install dependencies
           sudo apt-get update
-          sudo apt-get install -y docker.io
-          sudo systemctl start docker
+          sudo apt-get install -y ca-certificates curl gnupg lsb-release
+
+          # Add Docker's official GPG key
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add Docker repository
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          # Update package index
+          sudo apt-get update
+
+          # Fix conflict: Remove base containerd if present, then install containerd.io
+          sudo apt-get install -y --allow-downgrades containerd.io=1.7.* || true
+          
+          # Start Docker daemon
+          sudo dockerd &
+          # Wait for docker to be ready
+          sleep 3
 
       - name: Pull Zimit Docker image
         run: docker pull openzim/zimit:latest
