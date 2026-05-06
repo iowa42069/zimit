@@ -1,4 +1,4 @@
-name: Zimit Website Archiver
+name: Zimit Website Archiver (Flexible Naming)
 
 on:
   workflow_dispatch:
@@ -6,9 +6,7 @@ on:
       website_url:
         description: 'The URL of the website to archive'
         required: true
-      zim_file_name_prefix: # Renamed for clarity, to indicate it's a prefix
-        description: 'Prefix for the ZIM file name (e.g., mywebsite)'
-        required: true
+      # No need for a specific ZIM file name input anymore
 
 jobs:
   archive_website:
@@ -31,49 +29,60 @@ jobs:
             -v ${{ github.workspace }}/output:/output \
             ghcr.io/openzim/zimit \
             zimit --seeds ${{ github.event.inputs.website_url }} \
-            --name ${{ github.event.inputs.zim_file_name_prefix }} \
+            --name zimit_generated # Using a generic name, Zimit might still append date/time
             --output /output \
             --pageLimit 1000
           echo "::endgroup::"
 
-      - name: List files in output directory
-        id: list_files # Give this step an ID
+      - name: Find the generated ZIM file
+        id: find_zim
         run: |
           echo "::group::Contents of the output directory:"
           ls -l ${{ github.workspace }}/output
           echo "::endgroup::"
-          # Extract the actual ZIM filename and set it as an output
-          # This assumes the ZIM file is the only .zim file in the directory
-          ACTUAL_ZIM_FILE=$(ls ${{ github.workspace }}/output | grep '\.zim$' | head -n 1)
-          echo "::set-output name=actual_zim_file::$ACTUAL_ZIM_FILE"
 
-      - name: Upload ZIM file artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.list_files.outputs.actual_zim_file }} # Use the captured filename
-          path: output/${{ steps.list_files.outputs.actual_zim_file }} # Use the captured filename
+          # Find the first .zim file in the output directory
+          ZIM_FILE=$(find ${{ github.workspace }}/output -maxdepth 1 -name "*.zim" -print -quit)
 
-      - name: Commit and push ZIM file
-        run: |
-          cd output
-          ZIM_FILE="${{ steps.list_files.outputs.actual_zim_file }}" # Use the captured filename
-
-          if [ ! -f "$ZIM_FILE" ]; then
-            echo "Error: ZIM file '$ZIM_FILE' not found in the output directory."
-            echo "Contents of output directory:"
-            ls -l
+          if [ -z "$ZIM_FILE" ]; then
+            echo "Error: No .zim file found in the output directory."
             exit 1
           fi
 
           echo "Found ZIM file: $ZIM_FILE"
+          # Extract just the filename for artifact upload and commit
+          FILENAME=$(basename "$ZIM_FILE")
+          echo "::set-output name=zim_file_path::$ZIM_FILE"
+          echo "::set-output name=zim_file_name::$FILENAME"
+
+      - name: Upload ZIM file artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_zim.outputs.zim_file_name }} # Use the found filename
+          path: ${{ steps.find_zim.outputs.zim_file_path }} # Use the found full path
+
+      - name: Commit and push ZIM file
+        run: |
+          ZIM_FILE_PATH="${{ steps.find_zim.outputs.zim_file_path }}"
+          ZIM_FILE_NAME="${{ steps.find_zim.outputs.zim_file_name }}"
+
+          if [ ! -f "$ZIM_FILE_PATH" ]; then
+            echo "Error: ZIM file '$ZIM_FILE_PATH' not found."
+            exit 1
+          fi
+
+          echo "Preparing to commit and push: $ZIM_FILE_NAME"
+          cd ${{ github.workspace }} # Ensure we are in the root of the workspace for git commands
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
-          git add "$ZIM_FILE"
+
+          # Add the specific file found
+          git add "$ZIM_FILE_PATH"
 
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Automated ZIM archive of ${{ github.event.inputs.website_url }} (File: $ZIM_FILE)"
+            git commit -m "Automated ZIM archive of ${{ github.event.inputs.website_url }} (File: $ZIM_FILE_NAME)"
             git push origin HEAD:${{ github.ref_name }}
           fi
         env:
