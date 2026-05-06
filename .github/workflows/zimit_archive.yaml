@@ -18,23 +18,21 @@ on:
         default: ''
         type: string
 
-jobs: # This is the top-level jobs key
-  archive_website: # This is the job ID
+jobs:
+  archive_website:
     runs-on: ubuntu-latest
     permissions:
       contents: write # Needed to commit back to the repository
 
-    steps: # Steps are nested under the job
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0 # Fetch all history for proper git operations
+          fetch-depth: 0
 
       - name: Configure Git for Large Files
         run: |
-          echo "Configuring Git for large file handling..."
-          # Comprehensive Git configuration for better large file handling, inspired by avasam.ir downloader workflow
           git config --global http.postBuffer 524288000
           git config --global http.maxRequestBuffer 100M
           git config --global core.compression 0
@@ -43,156 +41,96 @@ jobs: # This is the top-level jobs key
           git config --global pack.threads 1
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          echo "Git configured."
 
-      - name: Set up Zimit environment
+      - name: Set up Docker
         run: |
-          echo "Installing Docker..."
-          sudo apt-get update && sudo apt-get install -y docker.io
+          sudo apt-get update
+          sudo apt-get install -y docker.io
           sudo systemctl start docker
-          echo "Docker installed and started."
 
       - name: Pull Zimit Docker image
         run: docker pull openzim/zimit:latest
 
       - name: Run Zimit to create ZIM file
-        id: run_zimit # Added ID for potential future use/reference
+        id: run_zimit
         run: |
-          set -e # Exit immediately if a command exits with a non-zero status.
-          set -o pipefail # Causes a pipeline to return the exit status of the last command that exited with a non-zero status.
-
+          set -e
           WEBSITE_URL="${{ github.event.inputs.website_url }}"
           OUTPUT_DIR="${{ github.event.inputs.output_directory }}"
           ZIMIT_OPTIONS="${{ github.event.inputs.zimit_options }}"
 
-          # Ensure output directory exists inside the container's mounted workspace
-          # The workspace is mounted at /github/workspace by default in GitHub Actions
+          # Sanitize URL for filename
+          SANITIZED_NAME=$(echo "$WEBSITE_URL" | sed 's#^https\?://##' | sed 's#/#_#g' | sed 's/[^a-zA-Z0-9_-]/_/g')
+          FILE_NAME="${SANITIZED_NAME}_$(date +'%Y-%m').zim"
+
+          # Ensure output directory exists
           mkdir -p "$OUTPUT_DIR"
 
           echo "Running Zimit for website: $WEBSITE_URL"
-          echo "Output directory (container): $OUTPUT_DIR"
-          echo "Zimit options: $ZIMIT_OPTIONS"
+          echo "Output file: $OUTPUT_DIR/$FILE_NAME"
 
-          # The docker run command with corrected argument parsing
+          # Run Zimit
           docker run --rm \
             -v ${{ github.workspace }}:/github/workspace \
+            -w /github/workspace \
             openzim/zimit:latest \
             --seeds "$WEBSITE_URL" \
-            --name "$(echo "$WEBSITE_URL" | sed 's#https://##; s#http://##; s#[^a-zA-Z0-9_-]#_#g')_$(date +'%Y-%m')" \
+            --name "$FILE_NAME" \
             --output "$OUTPUT_DIR" \
             --pageLimit 1000 \
             $ZIMIT_OPTIONS
 
           echo "Zimit process finished."
-        env:
-          # No specific env vars needed here unless zimit requires them.
 
       - name: Find the generated ZIM file
         id: find_zim
         run: |
           WEBSITE_URL="${{ github.event.inputs.website_url }}"
           OUTPUT_DIR="${{ github.event.inputs.output_directory }}"
-          # Find the .zim file in the specified output directory.
-          # This assumes only one .zim file is generated per run.
-          # The find command is robust to various naming conventions.
-          ZIM_FILE_PATH=$(find "$OUTPUT_DIR" -maxdepth 1 -name "*.zim" -print -quit)
+          
+          # Sanitize URL for filename to match the one created in the previous step
+          SANITIZED_NAME=$(echo "$WEBSITE_URL" | sed 's#^https\?://##' | sed 's#/#_#g' | sed 's/[^a-zA-Z0-9_-]/_/g')
+          EXPECTED_FILE="${SANITIZED_NAME}_$(date +'%Y-%m').zim"
+          EXPECTED_PATH="${OUTPUT_DIR}/${EXPECTED_FILE}"
 
-          if [ -n "$ZIM_FILE_PATH" ]; then
-            ZIM_FILE_NAME=$(basename "$ZIM_FILE_PATH")
-            echo "Found ZIM file: $ZIM_FILE_PATH"
-            echo "zim_file_path=$ZIM_FILE_PATH" >> $GITHUB_OUTPUT
-            echo "zim_file_name=$ZIM_FILE_NAME" >> $GITHUB_OUTPUT
+          if [ -f "$EXPECTED_PATH" ]; then
+            echo "Found ZIM file: $EXPECTED_PATH"
+            echo "zim_file_path=$EXPECTED_PATH" >> $GITHUB_OUTPUT
+            echo "zim_file_name=$(basename $EXPECTED_PATH)" >> $GITHUB_OUTPUT
           else
-            echo "Error: No .zim file found in '$OUTPUT_DIR' after Zimit run."
-            # Explicitly set outputs to empty to indicate failure
-            echo "zim_file_path=''" >> $GITHUB_OUTPUT
-            echo "zim_file_name=''" >> $GITHUB_OUTPUT
-            # Exit with a non-zero status to fail the workflow run
-            exit 1
+            # Fallback: Try to find any .zim file if the name didn't match exactly
+            ZIM_FILE_PATH=$(find "$OUTPUT_DIR" -maxdepth 1 -name "*.zim" -print -quit)
+            if [ -n "$ZIM_FILE_PATH" ]; then
+              echo "Found ZIM file (fallback): $ZIM_FILE_PATH"
+              echo "zim_file_path=$ZIM_FILE_PATH" >> $GITHUB_OUTPUT
+              echo "zim_file_name=$(basename $ZIM_FILE_PATH)" >> $GITHUB_OUTPUT
+            else
+              echo "Error: No .zim file found in '$OUTPUT_DIR' after Zimit run."
+              exit 1
+            fi
           fi
-        shell: bash
 
       - name: Commit and push ZIM file
         run: |
           ZIM_FILE_PATH="${{ steps.find_zim.outputs.zim_file_path }}"
           ZIM_FILE_NAME="${{ steps.find_zim.outputs.zim_file_name }}"
           WEBSITE_URL="${{ github.event.inputs.website_url }}"
-          # Define a directory for potential error reports
-          ERROR_REPORT_DIR="/tmp/zimit_error_report_$$"
 
-          # --- Enhanced Error Handling & Git Operations ---
-          set -e # Ensure script exits on error
-          set -o pipefail # Ensure pipeline errors are caught
-
-          echo "Starting commit and push process..."
-
-          # 1. Check if ZIM file was successfully found in the previous step
-          if [ -z "$ZIM_FILE_PATH" ] || [ ! -f "$ZIM_FILE_PATH" ]; then
-            echo "Error: ZIM file path is empty or file does not exist at '$ZIM_FILE_PATH'."
-            # Generate an error report file
-            mkdir -p "$ERROR_REPORT_DIR"
-            cat << EOF > "$ERROR_REPORT_DIR/README.md"
-# Zimit Archiving Failed: ZIM File Not Found or Zimit Execution Error
-
-## Details
-*   **Website URL Processed:** \`${WEBSITE_URL}\`
-*   **Expected ZIM File Path:** \`${ZIM_FILE_PATH:-Not Found}\`
-*   **Workflow Run URL:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-*   **Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')
-*   **Status:** **FAILED**
-
-## Error Summary
-The Zimit process failed to generate a valid ZIM file, or the file could not be located after generation. Please check the workflow logs above for specific errors from the 'Run Zimit to create ZIM file' or 'Find the generated ZIM file' steps.
-
-## Possible Solutions
-*   **Check Zimit Logs:** Review the output from the 'Run Zimit to create ZIM file' step for any error messages. The Docker container might have encountered issues (e.g., network, permissions, invalid URL).
-*   **Verify Output Directory:** Ensure the specified output directory (\`${{ github.event.inputs.output_directory }}\`) is correctly configured and accessible by Zimit within the Docker container.
-*   **Validate URL:** Double-check that the input \`website_url\` is correct and publicly accessible. Some websites may block automated scraping or require specific headers.
-*   **Zimit Options:** If you provided custom \`zimit_options\`, ensure they are valid.
-*   **File Not Found:** If the Zimit step appears successful but no \`.zim\` file is found, there might be an issue with Zimit's output mechanism or the \`find\` command pattern.
-EOF
-            echo "Generated error report at $ERROR_REPORT_DIR/README.md"
-            # Optionally, add and commit this error report to the repo to track failures
-            # git add "$ERROR_REPORT_DIR/README.md"
-            # git commit -m "Automated ZIM Archiving Failed: $WEBSITE_URL (File Not Found)"
-            # git push origin HEAD:${{ github.ref_name }}
-            exit 1 # Fail the workflow
-          fi
-
-          echo "ZIM file found: '$ZIM_FILE_PATH' ($ZIM_FILE_NAME)"
-
-          # 2. Ensure Git is configured correctly (using settings from the downloader example)
-          echo "Configuring Git user..."
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          echo "Git user configured."
-
-          echo "Applying large file Git configurations..."
-          git config --global http.postBuffer 524288000
-          git config --global http.maxRequestBuffer 100M
-          git config --global core.compression 0
-          git config --global pack.windowMemory 256m
-          git config --global pack.packSizeLimit 100m
-          git config --global pack.threads 1
-          echo "Large file Git configurations applied."
-
-          # 3. Add the generated ZIM file to be committed
           echo "Adding ZIM file to Git staging area: $ZIM_FILE_PATH"
           git add "$ZIM_FILE_PATH"
 
-          # 4. Check if there are any staged changes before committing
           if git diff --staged --quiet; then
             echo "No new changes to commit. The ZIM file may already be up-to-date."
           else
-            # 5. Commit the changes
             COMMIT_MESSAGE="Automated ZIM archive of $WEBSITE_URL (File: $ZIM_FILE_NAME)"
             echo "Committing changes with message: '$COMMIT_MESSAGE'"
             git commit -m "$COMMIT_MESSAGE"
 
-            # 6. Push the changes to the repository
-            echo "Pushing changes to origin/${{ github.ref_name }}..."
-            git push origin HEAD:${{ github.ref_name }}
+            # Determine the branch name safely
+            BRANCH_NAME=${{ github.head_ref || github.ref_name || 'main' }}
+            
+            echo "Pushing changes to origin/$BRANCH_NAME..."
+            git push origin HEAD:$BRANCH_NAME
+            
             echo "Successfully committed and pushed '$ZIM_FILE_NAME'."
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Token needed for git push
